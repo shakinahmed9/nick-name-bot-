@@ -1,4 +1,5 @@
 require('dotenv').config();
+const fs = require('fs');
 
 // nicknameBot.js (top)
 const { Client, GatewayIntentBits, EmbedBuilder, ActivityType, PermissionsBitField } = require('discord.js');
