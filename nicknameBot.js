@@ -1,7 +1,8 @@
+require('dotenv').config();
 
+// nicknameBot.js (top)
 const { Client, GatewayIntentBits, EmbedBuilder, ActivityType, PermissionsBitField } = require('discord.js');
 
-// Bot client with required intents
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -11,18 +12,21 @@ const client = new Client({
   ]
 });
 
-// Your custom IDs here
-const TARGET_CHANNEL_ID = 'YOUR_CHANNEL_ID';
-const LOG_CHANNEL_ID = 'YOUR_LOG_CHANNEL_ID';
-const SERVER_ID = 'YOUR_SERVER_ID';
+// Load env (if you run with node directly ensure process.env is set or use dotenv)
+const TARGET_CHANNEL_ID = process.env.TARGET_CHANNEL_ID;
+const LOG_CHANNEL_ID    = process.env.LOG_CHANNEL_ID;
+const SERVER_ID         = process.env.SERVER_ID;
 
-// 🛡 Encoded credit message (base64)
-const ENCODED_CREDIT = 'VGFrZSBMb3ZlIEZyb20gSHlwZXJfRGV0ZWN0aXZl';
+// Optional: keep encoded credit in env or fallback to current value
+const ENCODED_CREDIT = process.env.ENCODED_CREDIT || 'VGFrZSBMb3ZlIEZyb20gSHlwZXJfRGV0ZWN0aXZl';
 
 // 🔐 Function to decode credit
 function getCreditMessage() {
   return Buffer.from(ENCODED_CREDIT, 'base64').toString('utf8');
 }
+
+// nicknameBot.js এর শুরুর দিকে যোগ করো
+const nickHistory = new Map(); // আগের nickname মনে রাখবে
 
 // 🌐 Bot ready event
 client.once('ready', () => {
@@ -42,55 +46,80 @@ client.once('ready', () => {
 
 // 📩 Message event
 client.on('messageCreate', async (message) => {
-  if (message.author.bot || message.channel.id !== TARGET_CHANNEL_ID) return;
+  if (message.author.bot) return;
 
-  const guild = client.guilds.cache.get(SERVER_ID);
-  if (!guild) return;
+  const args = message.content.trim().split(/\s+/);
+  const command = args.shift()?.toLowerCase();
 
-  const member = guild.members.cache.get(message.author.id);
-  if (!member) return;
+  // ----------------------
+  // !nick command
+  // ----------------------
+  if (command === '!nick') {
+    if (!message.member.permissions.has(PermissionsBitField.Flags.ManageNicknames))
+      return message.reply("❌ You don't have permission to use this command!");
 
-  // Ensure permission to set nickname
-  if (!guild.members.me.permissions.has(PermissionsBitField.Flags.ManageNicknames)) {
-    console.log("❌ Missing Manage Nicknames permission.");
-    return;
-  }
+    const member = message.mentions.members.first();
+    if (!member) return message.reply("⚠️ Mention a user!");
+    const newNick = args[0] && !args[0].startsWith('<') ? args[0] : args[1];
+    if (!newNick) return message.reply("⚠️ Provide a new nickname!");
 
-  const newNickname = `💬 ${message.content.substring(0, 20)} • ${message.author.username}`;
-  try {
-    await member.setNickname(newNickname.substring(0, 32));
+    const timeArg = args.find(a => /[smhd]$/i.test(a)); // e.g. 10m, 2h
+    let durationMs = 0;
 
-    // Embed for user
-    const replyEmbed = new EmbedBuilder()
-      .setColor(0x00AE86)
-      .setTitle("✅ Nickname Updated!")
-      .setDescription(`Your nickname is now:\n\\`${newNickname}\``)
-      .setFooter({ text: getCreditMessage() });
-
-    await message.reply({ embeds: [replyEmbed] });
-
-    // Log embed
-    const logChannel = guild.channels.cache.get(LOG_CHANNEL_ID);
-    if (logChannel && logChannel.isTextBased()) {
-      const logEmbed = new EmbedBuilder()
-        .setColor(0xff9900)
-        .setTitle("📋 Nickname Change Log")
-        .addFields(
-          { name: 'User', value: `${message.author.tag} (${message.author.id})` },
-          { name: 'New Nickname', value: newNickname },
-          { name: 'Channel', value: `<#${TARGET_CHANNEL_ID}>` },
-          { name: 'Server ID', value: SERVER_ID }
-        )
-        .setFooter({ text: getCreditMessage() })
-        .setTimestamp();
-
-      logChannel.send({ embeds: [logEmbed] });
+    if (timeArg) {
+      const num = parseInt(timeArg);
+      const unit = timeArg.slice(-1);
+      const multipliers = { s: 1000, m: 60000, h: 3600000, d: 86400000 };
+      durationMs = num * (multipliers[unit] || 0);
     }
 
-  } catch (error) {
-    console.error("⚠️ Error updating nickname:", error);
+    const oldNick = member.nickname || member.user.username;
+    try {
+      await member.setNickname(newNick);
+      await message.reply(`✅ Changed nickname of ${member.user.tag} to **${newNick}**`);
+      nickHistory.set(member.id, oldNick); // store old name
+      console.log(`Stored old nickname for ${member.user.tag}: ${oldNick}`);
+
+      // Auto revert
+      if (durationMs > 0) {
+        setTimeout(async () => {
+          try {
+            await member.setNickname(oldNick);
+            await message.channel.send(`⏰ Nickname of ${member.user.tag} reverted to **${oldNick}**`);
+            nickHistory.delete(member.id);
+          } catch (err) {
+            console.error("Failed to revert nickname:", err);
+          }
+        }, durationMs);
+      }
+
+    } catch (err) {
+      console.error(err);
+      message.reply("❌ Failed to change nickname. Maybe missing permission?");
+    }
+  }
+
+  // ----------------------
+  // !nickreset command
+  // ----------------------
+  if (command === '!nickreset') {
+    const member = message.mentions.members.first();
+    if (!member) return message.reply("⚠️ Mention a user to reset!");
+
+    const oldNick = nickHistory.get(member.id);
+    if (!oldNick) return message.reply("ℹ️ No nickname history found for that user.");
+
+    try {
+      await member.setNickname(oldNick);
+      await message.reply(`🔁 Nickname of ${member.user.tag} restored to **${oldNick}**`);
+      nickHistory.delete(member.id);
+    } catch (err) {
+      console.error(err);
+      message.reply("❌ Failed to reset nickname.");
+    }
   }
 });
 
 // 🔐 Secure login
-client.login('YOUR_BOT_TOKEN');
+client.login(process.env.DISCORD_TOKEN);
+
