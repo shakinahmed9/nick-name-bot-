@@ -1,0 +1,13 @@
+{
+  "name": "nickname-bot",
+  "version": "1.0.0",
+  "description": "A Discord nickname auto-change bot with history and revert",
+  "main": "nicknameBot.js",
+  "scripts": {
+    "start": "node nicknameBot.js"
+  },
+  "dependencies": {
+    "discord.js": "^14.15.3",
+    "dotenv": "^16.4.5"
+  }
+}
