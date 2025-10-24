@@ -29,6 +29,27 @@ function getCreditMessage() {
 // nicknameBot.js এর শুরুর দিকে যোগ করো
 const nickHistory = new Map(); // আগের nickname মনে রাখবে
 
+// === JSON file path ===
+const HISTORY_FILE = 'nickHistory.json';
+
+// === Load old nickname history from file ===
+if (fs.existsSync(HISTORY_FILE)) {
+  try {
+    const data = JSON.parse(fs.readFileSync(HISTORY_FILE, 'utf8'));
+    for (const [userId, oldNick] of data) {
+      nickHistory.set(userId, oldNick);
+    }
+    console.log(`📁 Loaded ${nickHistory.size} nickname records from JSON.`);
+  } catch (err) {
+    console.error("⚠️ Failed to load nickHistory.json:", err);
+  }
+}
+
+// === Save nickname history function ===
+function saveHistory() {
+  fs.writeFileSync(HISTORY_FILE, JSON.stringify([...nickHistory], null, 2));
+}
+
 // 🌐 Bot ready event
 client.once('ready', () => {
   const credit = getCreditMessage();
@@ -80,6 +101,24 @@ client.on('messageCreate', async (message) => {
       await message.reply(`✅ Changed nickname of ${member.user.tag} to **${newNick}**`);
       nickHistory.set(member.id, oldNick); // store old name
       console.log(`Stored old nickname for ${member.user.tag}: ${oldNick}`);
+      
+// === Send log to log channel ===
+const logChannel = message.guild.channels.cache.get(LOG_CHANNEL_ID);
+if (logChannel && logChannel.isTextBased()) {
+  const logEmbed = new EmbedBuilder()
+    .setColor(0xffa500)
+    .setTitle("📋 Nickname Changed")
+    .addFields(
+      { name: "User", value: `${member.user.tag} (${member.id})` },
+      { name: "Old Nickname", value: oldNick || "None", inline: true },
+      { name: "New Nickname", value: newNick, inline: true },
+      { name: "Changed By", value: `<@${message.author.id}>` },
+    )
+    .setTimestamp()
+    .setFooter({ text: getCreditMessage() });
+
+  logChannel.send({ embeds: [logEmbed] });
+}
 
       // Auto revert
       if (durationMs > 0) {
