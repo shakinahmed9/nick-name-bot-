@@ -1,6 +1,7 @@
 {
   "name": "nickname-bot",
   "version": "1.0.0",
+    "private": false,
   "description": "A Discord nickname auto-change bot with history and revert",
   "main": "nicknameBot.js",
   "scripts": {
