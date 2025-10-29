@@ -180,3 +180,12 @@ client.on('messageCreate', async (message) => {
 
 // === Secure Login ===
 client.login(process.env.DISCORD_TOKEN);
+
+// === Keep Bot Alive on Render ===
+const express = require('express');
+const app = express();
+
+app.get('/', (req, res) => res.send('Bot is running!'));
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
