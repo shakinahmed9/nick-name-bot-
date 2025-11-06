@@ -22,7 +22,7 @@ const client = new Client({
 
 // === ENV Vars ===
 const TARGET_CHANNEL_ID = process.env.TARGET_CHANNEL_ID;
-const LOG_CHANNEL_ID = process.env.LOG_CHANNEL_ID; // For logs
+const LOG_CHANNEL_ID = process.env.LOG_CHANNEL_ID; 
 const NICK_MANAGER_ROLE_ID = process.env.NICK_MANAGER_ROLE_ID;
 const ENCODED_CREDIT = process.env.ENCODED_CREDIT || 'VGFrZSBMb3ZlIEZyb20gSHlwZXJfRGV0ZWN0aXZl';
 
@@ -62,10 +62,14 @@ client.on('messageCreate', async (message) => {
   if (message.author.bot) return;
   if (message.channel.id !== TARGET_CHANNEL_ID) return;
 
-  const match = message.content.match(/^nick:\s*(.+)$/i);
-  if (!match) return;
+  // === Syntax check: only allow nickname if message starts with allowed prefix ===
+  const allowedPrefixes = ['!', ':']; // Add your allowed symbols
+  const firstChar = message.content.charAt(0);
+  if (firstChar && !allowedPrefixes.includes(firstChar)) return; // ignore message
 
-  const newNick = match[1];
+  const newNick = message.content.slice(1).trim(); // remove prefix
+  if (!newNick) return;
+
   const member = await message.guild.members.fetch(message.author.id);
   const oldNick = member.nickname || member.user.username;
 
@@ -103,7 +107,7 @@ client.on('messageCreate', async (message) => {
   // Collector for button clicks
   const collector = botMsg.createMessageComponentCollector({
     componentType: 'BUTTON',
-    time: 60000
+    time: 120000 // 2 mins
   });
 
   collector.on('collect', async (interaction) => {
@@ -111,23 +115,26 @@ client.on('messageCreate', async (message) => {
       return interaction.reply({ content: "⚠️ You don't have permission to manage nicknames.", ephemeral: true });
     }
 
+    await interaction.deferUpdate(); // prevent "This interaction failed"
+
     if (interaction.customId === 'accept') {
       try {
         nickHistory.set(member.id, oldNick);
         await member.setNickname(newNick);
         saveHistory();
 
-        await interaction.update({ content: `✅ Nickname changed to **${newNick}**`, embeds: [], components: [] });
+        await interaction.editReply({ content: `✅ Nickname changed to **${newNick}**`, embeds: [], components: [] });
 
         const logChannel = message.guild.channels.cache.get(LOG_CHANNEL_ID);
         if (logChannel) logChannel.send(`✅ **${member.user.tag}** nickname changed to **${newNick}** by **${interaction.user.tag}**.`);
-      } catch {
-        await interaction.update({ content: "❌ Failed to change nickname.", embeds: [], components: [] });
+      } catch (err) {
+        console.error("Nickname change failed:", err);
+        await interaction.editReply({ content: "❌ Failed to change nickname.", embeds: [], components: [] });
       }
     }
 
     if (interaction.customId === 'reject') {
-      await interaction.update({ content: "❌ Request Rejected.", embeds: [], components: [] });
+      await interaction.editReply({ content: "❌ Request Rejected.", embeds: [], components: [] });
 
       const logChannel = message.guild.channels.cache.get(LOG_CHANNEL_ID);
       if (logChannel) logChannel.send(`❌ Nickname request rejected for **${member.user.tag}** by **${interaction.user.tag}**.`);
