@@ -62,13 +62,15 @@ client.on('messageCreate', async (message) => {
   if (message.author.bot) return;
   if (message.channel.id !== TARGET_CHANNEL_ID) return;
 
-  // === Syntax check: only allow nickname if message starts with allowed prefix ===
-  const allowedPrefixes = ['!', ':']; // Add your allowed symbols
-  const firstChar = message.content.charAt(0);
-  if (firstChar && !allowedPrefixes.includes(firstChar)) return; // ignore message
-
-  const newNick = message.content.slice(1).trim(); // remove prefix
+  let newNick = message.content.trim();
   if (!newNick) return;
+
+  // Remove optional allowed prefixes
+  const allowedPrefixes = ['!', ':']; 
+  const firstChar = newNick.charAt(0);
+  if (allowedPrefixes.includes(firstChar)) {
+    newNick = newNick.slice(1).trim();
+  }
 
   const member = await message.guild.members.fetch(message.author.id);
   const oldNick = member.nickname || member.user.username;
