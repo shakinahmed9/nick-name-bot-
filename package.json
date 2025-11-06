@@ -1,14 +1,19 @@
 {
   "name": "nickname-bot",
   "version": "1.0.0",
-    "private": false,
-  "description": "A Discord nickname auto-change bot with history and revert",
+  "private": false,
+  "description": "A Discord nickname auto-change bot with history and approval system",
   "main": "nicknameBot.js",
   "scripts": {
-    "start": "node nicknameBot.js"
+    "start": "node nicknameBot.js",
+    "dev": "nodemon nicknameBot.js"
   },
   "dependencies": {
     "discord.js": "^14.15.3",
-    "dotenv": "^16.4.5"
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2"
+  },
+  "engines": {
+    "node": ">=18"
   }
 }
