@@ -1,7 +1,15 @@
 require('dotenv').config();
 const fs = require('fs');
 const express = require('express');
-const { Client, GatewayIntentBits, EmbedBuilder, ActivityType, PermissionsBitField } = require('discord.js');
+const { 
+  Client, 
+  GatewayIntentBits, 
+  EmbedBuilder, 
+  ActivityType, 
+  ActionRowBuilder, 
+  ButtonBuilder, 
+  ButtonStyle 
+} = require('discord.js');
 
 const client = new Client({
   intents: [
@@ -14,7 +22,7 @@ const client = new Client({
 
 // === ENV Vars ===
 const TARGET_CHANNEL_ID = process.env.TARGET_CHANNEL_ID;
-const LOG_CHANNEL_ID = process.env.LOG_CHANNEL_ID;
+const LOG_CHANNEL_ID = process.env.LOG_CHANNEL_ID; // For logs
 const NICK_MANAGER_ROLE_ID = process.env.NICK_MANAGER_ROLE_ID;
 const ENCODED_CREDIT = process.env.ENCODED_CREDIT || 'VGFrZSBMb3ZlIEZyb20gSHlwZXJfRGV0ZWN0aXZl';
 
@@ -30,7 +38,7 @@ if (fs.existsSync(HISTORY_FILE)) {
   try {
     const data = JSON.parse(fs.readFileSync(HISTORY_FILE, 'utf8'));
     for (const [id, oldNick] of data) nickHistory.set(id, oldNick);
-  } catch (err) {}
+  } catch {}
 }
 
 function saveHistory() {
@@ -49,7 +57,7 @@ client.once('ready', () => {
   console.log(`✅ Bot Active as ${client.user.tag}`);
 });
 
-// === Request System ===
+// === Nickname Request System with Buttons ===
 client.on('messageCreate', async (message) => {
   if (message.author.bot) return;
   if (message.channel.id !== TARGET_CHANNEL_ID) return;
@@ -58,8 +66,14 @@ client.on('messageCreate', async (message) => {
   if (!match) return;
 
   const newNick = match[1];
-  const member = message.member;
+  const member = await message.guild.members.fetch(message.author.id);
   const oldNick = member.nickname || member.user.username;
+
+  // Role hierarchy safety
+  const botMember = message.guild.members.me;
+  if (member.roles.highest.position >= botMember.roles.highest.position) {
+    return message.reply("⚠️ I can't change your nickname because your role is higher or equal to mine.");
+  }
 
   const embed = new EmbedBuilder()
     .setColor(0x00aaff)
@@ -67,61 +81,82 @@ client.on('messageCreate', async (message) => {
     .addFields(
       { name: "User", value: `${member.user.tag}` },
       { name: "Old Nickname", value: oldNick },
-      { name: "Requested New Nickname", value: newNick }
+      { name: "Requested Nickname", value: newNick }
     )
-    .setTimestamp()
-    .setFooter({ text: getCreditMessage() });
+    .setFooter({ text: getCreditMessage() })
+    .setTimestamp();
 
-  const botMsg = await message.channel.send({ embeds: [embed] });
+  const row = new ActionRowBuilder()
+    .addComponents(
+      new ButtonBuilder()
+        .setCustomId('accept')
+        .setLabel('✅ Accept')
+        .setStyle(ButtonStyle.Success),
+      new ButtonBuilder()
+        .setCustomId('reject')
+        .setLabel('❌ Reject')
+        .setStyle(ButtonStyle.Danger)
+    );
 
-  // Wait for Approve/Reject
-  const collector = message.channel.createMessageCollector({
-    filter: (m) =>
-      !m.author.bot &&
-      m.member.roles.cache.has(NICK_MANAGER_ROLE_ID) &&
-      (m.content.toLowerCase() === "accept" || m.content.toLowerCase() === "reject"),
-    time: 60000,
+  const botMsg = await message.channel.send({ embeds: [embed], components: [row] });
+
+  // Collector for button clicks
+  const collector = botMsg.createMessageComponentCollector({
+    componentType: 'BUTTON',
+    time: 60000
   });
 
-  collector.on('collect', async (m) => {
-    if (m.content.toLowerCase() === "accept") {
+  collector.on('collect', async (interaction) => {
+    if (!interaction.member.roles.cache.has(NICK_MANAGER_ROLE_ID)) {
+      return interaction.reply({ content: "⚠️ You don't have permission to manage nicknames.", ephemeral: true });
+    }
+
+    if (interaction.customId === 'accept') {
       try {
         nickHistory.set(member.id, oldNick);
         await member.setNickname(newNick);
         saveHistory();
 
-        botMsg.reply(`✅ Nickname changed to **${newNick}**`);
+        await interaction.update({ content: `✅ Nickname changed to **${newNick}**`, embeds: [], components: [] });
+
+        const logChannel = message.guild.channels.cache.get(LOG_CHANNEL_ID);
+        if (logChannel) logChannel.send(`✅ **${member.user.tag}** nickname changed to **${newNick}** by **${interaction.user.tag}**.`);
       } catch {
-        botMsg.reply("❌ Failed to change nickname.");
+        await interaction.update({ content: "❌ Failed to change nickname.", embeds: [], components: [] });
       }
-    } else {
-      botMsg.reply("❌ Request Rejected.");
+    }
+
+    if (interaction.customId === 'reject') {
+      await interaction.update({ content: "❌ Request Rejected.", embeds: [], components: [] });
+
+      const logChannel = message.guild.channels.cache.get(LOG_CHANNEL_ID);
+      if (logChannel) logChannel.send(`❌ Nickname request rejected for **${member.user.tag}** by **${interaction.user.tag}**.`);
     }
 
     collector.stop();
   });
 });
 
-// === Log Resets (Optional Command) ===
+// === Restore Command ===
 client.on('messageCreate', async (message) => {
-  if (message.content.startsWith("nickreset")) {
-    const member = message.mentions.members.first();
-    if (!member) return;
+  if (!message.content.startsWith("nickreset")) return;
 
-    const oldNick = nickHistory.get(member.id);
-    if (!oldNick) return message.reply("ℹ️ No saved nickname.");
+  const member = message.mentions.members.first();
+  if (!member) return message.reply("🔍 Mention someone.");
 
-    await member.setNickname(oldNick);
-    nickHistory.delete(member.id);
-    saveHistory();
+  const oldNick = nickHistory.get(member.id);
+  if (!oldNick) return message.reply("ℹ️ No previous nickname stored.");
 
-    message.reply(`🔁 Restored nickname: **${oldNick}**`);
-  }
+  await member.setNickname(oldNick);
+  nickHistory.delete(member.id);
+  saveHistory();
+
+  message.reply(`🔁 Restored nickname to **${oldNick}**`);
 });
 
 // === Keep Alive ===
 const app = express();
-app.get("/", (req, res) => res.send("Bot Running"));
+app.get("/", (req, res) => res.send("Bot Running ✅"));
 app.listen(process.env.PORT || 3000);
 
 // === Login ===
