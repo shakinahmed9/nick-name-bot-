@@ -64,14 +64,35 @@ client.on('messageCreate', async (message) => {
 
   const content = message.content.trim().toLowerCase();
 
-  // ✅ CLEAR NICK COMMAND
+  // ✅ CLEAR NICK COMMAND (Now with embed)
   if (content === "clear nick") {
+    const member = await message.guild.members.fetch(message.author.id);
+    const oldNick = member.nickname || member.user.username;
     try {
-      const member = await message.guild.members.fetch(message.author.id);
       await member.setNickname(null);
-      message.reply("🧼 Your nickname has been cleared successfully!");
+
+      const clearEmbed = new EmbedBuilder()
+        .setColor(0x00ffff)
+        .setTitle("🧼 Nickname Cleared Successfully")
+        .setThumbnail(member.displayAvatarURL({ dynamic: true }))
+        .addFields(
+          { name: "👤 User", value: `${member}`, inline: true },
+          { name: "🧾 Previous Nickname", value: `${oldNick}`, inline: true },
+          { name: "📅 Cleared On", value: `<t:${Math.floor(Date.now() / 1000)}:F>`, inline: false }
+        )
+        .setFooter({ text: "Made by Mr. Bean with Love. | Nickname Management System." })
+        .setTimestamp();
+
+      await message.reply({ embeds: [clearEmbed] });
     } catch {
-      message.reply("⚠️ I couldn’t clear your nickname (missing permission or role hierarchy).");
+      const errorEmbed = new EmbedBuilder()
+        .setColor(0xff4e4e)
+        .setTitle("⚠️ Failed to Clear Nickname")
+        .setDescription("I couldn’t clear your nickname. This might be due to **missing permissions** or **role hierarchy issues**.")
+        .setFooter({ text: "Please contact an admin if this issue persists." })
+        .setTimestamp();
+
+      await message.reply({ embeds: [errorEmbed] });
     }
     return;
   }
@@ -110,16 +131,13 @@ client.on('messageCreate', async (message) => {
     .setFooter({ text: "Wait for a moderator to approve or reject your request." })
     .setTimestamp();
 
-  // ✅ Send confirmation to user in request channel
   const userMsg = await message.reply({ embeds: [requestEmbed], allowedMentions: { users: [] } });
 
-  // ✅ Buttons for moderators
   const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId('accept').setLabel('✅ Approve').setStyle(ButtonStyle.Success),
     new ButtonBuilder().setCustomId('reject').setLabel('❌ Reject').setStyle(ButtonStyle.Danger)
   );
 
-  // ✅ Send to moderator log channel (with role mention)
   const logChannel = message.guild.channels.cache.get(LOG_CHANNEL_ID);
   if (!logChannel) return console.error("⚠️ Log channel not found!");
 
@@ -132,7 +150,6 @@ client.on('messageCreate', async (message) => {
     allowedMentions: { roles: [NICK_MANAGER_ROLE_ID] }
   });
 
-  // ✅ Create collector for moderator actions
   const collector = modMsg.createMessageComponentCollector({ time: 180000 });
 
   collector.on('collect', async (interaction) => {
@@ -167,6 +184,7 @@ client.on('messageCreate', async (message) => {
             { name: "⏱️ Process Time", value: time, inline: true },
             { name: "📌 Status", value: "🟢 Approved", inline: false }
           )
+          .setFooter({ text: "Made by Mr. Bean with Love. | Nickname Management System." })
           .setTimestamp();
 
         await modMsg.edit({ content: "✅ Request processed.", embeds: [successEmbed], components: [] });
@@ -195,6 +213,7 @@ client.on('messageCreate', async (message) => {
           { name: "⏱️ Process Time", value: time, inline: true },
           { name: "📌 Status", value: "🔴 Rejected", inline: false }
         )
+        .setFooter({ text: "Made by Mr. Bean with Love. | Nickname Management System." })
         .setTimestamp();
 
       await modMsg.edit({ content: "❌ Request processed.", embeds: [rejectEmbed], components: [] });
