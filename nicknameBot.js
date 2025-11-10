@@ -91,43 +91,48 @@ client.on('messageCreate', async (message) => {
   }
 
   const requestId = `REQ-${Math.random().toString(36).slice(2, 6)}`;
+  const time = `<t:${Math.floor(Date.now() / 1000)}:F>`;
 
-  // Embed visible to everyone
+  // ✅ Request Embed (shown to user)
   const requestEmbed = new EmbedBuilder()
     .setColor(0x2bafff)
-    .setTitle("📝 Nickname Change Request")
+    .setTitle("📝 Nickname Change Request Submitted")
+    .setDescription("Your nickname change request has been sent for review by moderators.")
     .setThumbnail(member.displayAvatarURL({ dynamic: true }))
     .addFields(
       { name: "👤 User", value: `${member}`, inline: true },
       { name: "🆔 Request ID", value: requestId, inline: true },
       { name: "🧾 Old Nickname", value: `${oldNick}`, inline: false },
-      { name: "🆕 Requested Nickname", value: `${newNick}`, inline: false }
+      { name: "🆕 Requested Nickname", value: `${newNick}`, inline: false },
+      { name: "⏱️ Submitted", value: time, inline: false },
+      { name: "📌 Status", value: "🟡 Pending Review", inline: false }
     )
+    .setFooter({ text: "Wait for a moderator to approve or reject your request." })
     .setTimestamp();
 
-  // Send request embed in target channel (no buttons)
-  await message.channel.send({
-    embeds: [requestEmbed],
-    allowedMentions: { users: [] }
-  });
+  // ✅ Send confirmation to user in request channel
+  const userMsg = await message.reply({ embeds: [requestEmbed], allowedMentions: { users: [] } });
 
-  // Buttons (for mods only)
+  // ✅ Buttons for moderators
   const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId('accept').setLabel('✅ Approve').setStyle(ButtonStyle.Success),
     new ButtonBuilder().setCustomId('reject').setLabel('❌ Reject').setStyle(ButtonStyle.Danger)
   );
 
-  // Send to moderator log channel
+  // ✅ Send to moderator log channel (with role mention)
   const logChannel = message.guild.channels.cache.get(LOG_CHANNEL_ID);
   if (!logChannel) return console.error("⚠️ Log channel not found!");
 
+  const modMention = `<@&${NICK_MANAGER_ROLE_ID}>`;
+
   const modMsg = await logChannel.send({
+    content: `${modMention} 🔔 New nickname change request received.`,
     embeds: [requestEmbed],
     components: [row],
-    allowedMentions: { users: [] }
+    allowedMentions: { roles: [NICK_MANAGER_ROLE_ID] }
   });
 
-  // Collector for button actions
+  // ✅ Create collector for moderator actions
   const collector = modMsg.createMessageComponentCollector({ time: 180000 });
 
   collector.on('collect', async (interaction) => {
@@ -141,8 +146,8 @@ client.on('messageCreate', async (message) => {
     }
 
     await interaction.deferUpdate();
-    const time = `<t:${Math.floor(Date.now() / 1000)}:F>`;
 
+    // ✅ APPROVE
     if (interaction.customId === "accept") {
       try {
         nickHistory.set(member.id, oldNick);
@@ -161,12 +166,12 @@ client.on('messageCreate', async (message) => {
             { name: "🆔 Request ID", value: requestId, inline: true },
             { name: "⏱️ Process Time", value: time, inline: true },
             { name: "📌 Status", value: "🟢 Approved", inline: false }
-          );
+          )
+          .setTimestamp();
 
-        await modMsg.edit({ embeds: [successEmbed], components: [] });
-        member.send({ embeds: [successEmbed] }).catch(() => {});
-        const log = message.guild.channels.cache.get(LOG_CHANNEL_ID);
-        if (log) log.send({ embeds: [successEmbed] });
+        await modMsg.edit({ content: "✅ Request processed.", embeds: [successEmbed], components: [] });
+        await userMsg.edit({ embeds: [successEmbed], components: [] });
+        await member.send({ embeds: [successEmbed] }).catch(() => {});
       } catch {
         await modMsg.edit({
           content: "❌ Nickname change failed (Role hierarchy issue)",
@@ -175,6 +180,7 @@ client.on('messageCreate', async (message) => {
       }
     }
 
+    // ❌ REJECT
     if (interaction.customId === "reject") {
       const rejectEmbed = new EmbedBuilder()
         .setColor(0xff4e4e)
@@ -188,17 +194,17 @@ client.on('messageCreate', async (message) => {
           { name: "🆔 Request ID", value: requestId, inline: true },
           { name: "⏱️ Process Time", value: time, inline: true },
           { name: "📌 Status", value: "🔴 Rejected", inline: false }
-        );
+        )
+        .setTimestamp();
 
-      await modMsg.edit({ embeds: [rejectEmbed], components: [] });
-      member.send({ embeds: [rejectEmbed] }).catch(() => {});
-      const log = message.guild.channels.cache.get(LOG_CHANNEL_ID);
-      if (log) log.send({ embeds: [rejectEmbed] });
+      await modMsg.edit({ content: "❌ Request processed.", embeds: [rejectEmbed], components: [] });
+      await userMsg.edit({ embeds: [rejectEmbed], components: [] });
+      await member.send({ embeds: [rejectEmbed] }).catch(() => {});
     }
   });
 });
 
-// ✅ Express Keep-Alive (for Replit/Hosting)
+// ✅ Express Keep-Alive (for hosting)
 const app = express();
 app.get("/", (req, res) => res.send("Nickname Bot Running ✅"));
 app.listen(process.env.PORT || 3000);
