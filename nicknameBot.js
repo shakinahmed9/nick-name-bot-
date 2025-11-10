@@ -1,55 +1,21 @@
-require('dotenv').config();
-const fs = require('fs');
-const express = require('express');
-const { 
-  Client, 
-  GatewayIntentBits,
-  EmbedBuilder,
-  ActionRowBuilder,
-  ButtonBuilder,
-  ButtonStyle,
-  ActivityType
-} = require('discord.js');
-
-const client = new Client({
-  intents: [
-    GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent,
-    GatewayIntentBits.GuildMembers,
-  ]
-});
-
-// ENV Vars
-const TARGET_CHANNEL_ID = process.env.TARGET_CHANNEL_ID;
-const LOG_CHANNEL_ID = process.env.LOG_CHANNEL_ID;
-const NICK_MANAGER_ROLE_ID = process.env.NICK_MANAGER_ROLE_ID;
-
-// Nick history load
-const nickHistory = new Map();
-const HISTORY_FILE = 'nickHistory.json';
-if (fs.existsSync(HISTORY_FILE)) {
-  try {
-    const data = JSON.parse(fs.readFileSync(HISTORY_FILE, 'utf8'));
-    for (const [id, oldNick] of data) nickHistory.set(id, oldNick);
-  } catch {}
-}
-const saveHistory = () =>
-  fs.writeFileSync(HISTORY_FILE, JSON.stringify([...nickHistory], null, 2));
-
-process.on('exit', saveHistory);
-process.on('SIGINT', () => { saveHistory(); process.exit(); });
-
-client.once('ready', () => {
-  client.user.setPresence({
-    activities: [{ name: "Nickname System Active", type: ActivityType.Listening }],
-    status: 'online'
-  });
-  console.log(`✅ Bot Active as ${client.user.tag}`);
-});
-
 client.on('messageCreate', async (message) => {
   if (message.author.bot) return;
+
+  const content = message.content.trim().toLowerCase();
+
+  // ✅ CLEAR NICK COMMAND (works with any capitalization)
+  if (content === "clear nick") {
+    try {
+      const member = await message.guild.members.fetch(message.author.id);
+      await member.setNickname(null);
+      message.reply("🧼 Your nickname has been cleared successfully!");
+    } catch (err) {
+      message.reply("⚠️ I couldn’t clear your nickname (missing permission or role hierarchy).");
+    }
+    return;
+  }
+
+  // ✅ NICKNAME REQUEST HANDLER
   if (message.channel.id !== TARGET_CHANNEL_ID) return;
 
   let newNick = message.content.trim();
@@ -72,11 +38,11 @@ client.on('messageCreate', async (message) => {
     .addFields(
       { name: "👤 User", value: `${member}`, inline: true },
       { name: "🆔 Request ID", value: requestId, inline: true },
-      { name: "📝 Requested Nickname", value: `${newNick}`, inline: false }
+      { name: "🧾 Old Nickname", value: `${oldNick}`, inline: false },
+      { name: "🆕 Requested Nickname", value: `${newNick}`, inline: false }
     )
     .setTimestamp();
 
-  // BUTTONS ONLY FOR MOD ROLE
   const row = new ActionRowBuilder()
     .addComponents(
       new ButtonBuilder().setCustomId('accept').setLabel('✅ Approve').setStyle(ButtonStyle.Success),
@@ -93,14 +59,13 @@ client.on('messageCreate', async (message) => {
 
   collector.on('collect', async (interaction) => {
 
-    // **Hide button from non-role users**
-    if (!interaction.member.roles.cache.has(NICK_MANAGER_ROLE_ID)) {
+    // ✅ FIX: Correct member detection and role permission
+    const mod = await interaction.guild.members.fetch(interaction.user.id);
+    if (!mod.roles.cache.has(NICK_MANAGER_ROLE_ID)) {
       return interaction.reply({ content: "⚠️ You are not allowed to review nickname requests.", ephemeral: true });
     }
 
     await interaction.deferUpdate();
-    const mod = interaction.member;
-
     const time = `<t:${Math.floor(Date.now() / 1000)}:F>`;
 
     if (interaction.customId === "accept") {
@@ -116,6 +81,7 @@ client.on('messageCreate', async (message) => {
           .addFields(
             { name: "👤 User", value: `${member}`, inline: true },
             { name: "👮 Moderator", value: `${mod}`, inline: true },
+            { name: "🧾 Old Nickname", value: `${oldNick}`, inline: false },
             { name: "🆕 New Nickname", value: `${newNick}`, inline: false },
             { name: "🆔 Request ID", value: requestId, inline: true },
             { name: "⏱️ Process Time", value: time, inline: true },
@@ -140,6 +106,8 @@ client.on('messageCreate', async (message) => {
         .addFields(
           { name: "👤 User", value: `${member}`, inline: true },
           { name: "👮 Moderator", value: `${mod}`, inline: true },
+          { name: "🧾 Old Nickname", value: `${oldNick}`, inline: false },
+          { name: "🆕 Requested Nickname", value: `${newNick}`, inline: false },
           { name: "🆔 Request ID", value: requestId, inline: true },
           { name: "⏱️ Process Time", value: time, inline: true },
           { name: "📌 Status", value: "🔴 Rejected", inline: false }
@@ -152,20 +120,3 @@ client.on('messageCreate', async (message) => {
     }
   });
 });
-
-// nickreset @user
-client.on('messageCreate', async (message) => {
-  if (!message.content.startsWith("nickreset")) return;
-  const user = message.mentions.members.first();
-  if (!user) return message.reply("Mention someone.");
-  const old = nickHistory.get(user.id);
-  if (!old) return message.reply("No old nickname stored.");
-  await user.setNickname(old);
-  message.reply(`🔁 Restored nickname to **${old}**`);
-});
-
-const app = express();
-app.get("/", (req, res) => res.send("Bot Running ✅"));
-app.listen(process.env.PORT || 3000);
-
-client.login(process.env.DISCORD_TOKEN);
