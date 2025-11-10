@@ -1,15 +1,76 @@
+// ✅ Load dependencies
+require('dotenv').config();
+const fs = require('fs');
+const express = require('express');
+const {
+  Client,
+  GatewayIntentBits,
+  EmbedBuilder,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  ActivityType
+} = require('discord.js');
+
+// ✅ Initialize Discord Client
+const client = new Client({
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent,
+    GatewayIntentBits.GuildMembers,
+  ]
+});
+
+// ✅ ENV Variables
+const TARGET_CHANNEL_ID = process.env.TARGET_CHANNEL_ID;
+const LOG_CHANNEL_ID = process.env.LOG_CHANNEL_ID;
+const NICK_MANAGER_ROLE_ID = process.env.NICK_MANAGER_ROLE_ID;
+
+// ✅ Nick History Management
+const nickHistory = new Map();
+const HISTORY_FILE = 'nickHistory.json';
+
+if (fs.existsSync(HISTORY_FILE)) {
+  try {
+    const data = JSON.parse(fs.readFileSync(HISTORY_FILE, 'utf8'));
+    for (const [id, oldNick] of data) nickHistory.set(id, oldNick);
+  } catch (err) {
+    console.error('⚠️ Error reading history file:', err);
+  }
+}
+
+const saveHistory = () =>
+  fs.writeFileSync(HISTORY_FILE, JSON.stringify([...nickHistory], null, 2));
+
+process.on('exit', saveHistory);
+process.on('SIGINT', () => {
+  saveHistory();
+  process.exit();
+});
+
+// ✅ Bot Ready Event
+client.once('ready', () => {
+  client.user.setPresence({
+    activities: [{ name: "Nickname System Active", type: ActivityType.Listening }],
+    status: 'online'
+  });
+  console.log(`✅ Bot Active as ${client.user.tag}`);
+});
+
+// ✅ Message Create Handler
 client.on('messageCreate', async (message) => {
   if (message.author.bot) return;
 
   const content = message.content.trim().toLowerCase();
 
-  // ✅ CLEAR NICK COMMAND (works with any capitalization)
+  // ✅ CLEAR NICK COMMAND
   if (content === "clear nick") {
     try {
       const member = await message.guild.members.fetch(message.author.id);
       await member.setNickname(null);
       message.reply("🧼 Your nickname has been cleared successfully!");
-    } catch (err) {
+    } catch {
       message.reply("⚠️ I couldn’t clear your nickname (missing permission or role hierarchy).");
     }
     return;
@@ -31,7 +92,7 @@ client.on('messageCreate', async (message) => {
 
   const requestId = `REQ-${Math.random().toString(36).slice(2, 6)}`;
 
-  // Base request embed (visible to everyone)
+  // Embed visible to everyone
   const requestEmbed = new EmbedBuilder()
     .setColor(0x2bafff)
     .setTitle("📝 Nickname Change Request")
@@ -44,26 +105,19 @@ client.on('messageCreate', async (message) => {
     )
     .setTimestamp();
 
-  // Send request embed in target channel (everyone sees this, no buttons)
+  // Send request embed in target channel (no buttons)
   await message.channel.send({
     embeds: [requestEmbed],
     allowedMentions: { users: [] }
   });
 
-  // ✅ Build mod-only version with buttons
-  const row = new ActionRowBuilder()
-    .addComponents(
-      new ButtonBuilder()
-        .setCustomId('accept')
-        .setLabel('✅ Approve')
-        .setStyle(ButtonStyle.Success),
-      new ButtonBuilder()
-        .setCustomId('reject')
-        .setLabel('❌ Reject')
-        .setStyle(ButtonStyle.Danger)
-    );
+  // Buttons (for mods only)
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('accept').setLabel('✅ Approve').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId('reject').setLabel('❌ Reject').setStyle(ButtonStyle.Danger)
+  );
 
-  // ✅ Send moderator-only message (with buttons) in log channel
+  // Send to moderator log channel
   const logChannel = message.guild.channels.cache.get(LOG_CHANNEL_ID);
   if (!logChannel) return console.error("⚠️ Log channel not found!");
 
@@ -73,13 +127,12 @@ client.on('messageCreate', async (message) => {
     allowedMentions: { users: [] }
   });
 
-  // ✅ Create collector for moderator actions
+  // Collector for button actions
   const collector = modMsg.createMessageComponentCollector({ time: 180000 });
 
   collector.on('collect', async (interaction) => {
     const mod = await interaction.guild.members.fetch(interaction.user.id);
 
-    // Only users with NICK_MANAGER_ROLE_ID can approve/reject
     if (!mod.roles.cache.has(NICK_MANAGER_ROLE_ID)) {
       return interaction.reply({
         content: "⚠️ You are not allowed to review nickname requests.",
@@ -90,7 +143,6 @@ client.on('messageCreate', async (message) => {
     await interaction.deferUpdate();
     const time = `<t:${Math.floor(Date.now() / 1000)}:F>`;
 
-    // ✅ APPROVE
     if (interaction.customId === "accept") {
       try {
         nickHistory.set(member.id, oldNick);
@@ -112,9 +164,9 @@ client.on('messageCreate', async (message) => {
           );
 
         await modMsg.edit({ embeds: [successEmbed], components: [] });
-        const targetLog = message.guild.channels.cache.get(LOG_CHANNEL_ID);
-        if (targetLog) targetLog.send({ embeds: [successEmbed] });
         member.send({ embeds: [successEmbed] }).catch(() => {});
+        const log = message.guild.channels.cache.get(LOG_CHANNEL_ID);
+        if (log) log.send({ embeds: [successEmbed] });
       } catch {
         await modMsg.edit({
           content: "❌ Nickname change failed (Role hierarchy issue)",
@@ -123,7 +175,6 @@ client.on('messageCreate', async (message) => {
       }
     }
 
-    // ❌ REJECT
     if (interaction.customId === "reject") {
       const rejectEmbed = new EmbedBuilder()
         .setColor(0xff4e4e)
@@ -140,9 +191,17 @@ client.on('messageCreate', async (message) => {
         );
 
       await modMsg.edit({ embeds: [rejectEmbed], components: [] });
-      const targetLog = message.guild.channels.cache.get(LOG_CHANNEL_ID);
-      if (targetLog) targetLog.send({ embeds: [rejectEmbed] });
       member.send({ embeds: [rejectEmbed] }).catch(() => {});
+      const log = message.guild.channels.cache.get(LOG_CHANNEL_ID);
+      if (log) log.send({ embeds: [rejectEmbed] });
     }
   });
 });
+
+// ✅ Express Keep-Alive (for Replit/Hosting)
+const app = express();
+app.get("/", (req, res) => res.send("Nickname Bot Running ✅"));
+app.listen(process.env.PORT || 3000);
+
+// ✅ Start Bot
+client.login(process.env.DISCORD_TOKEN);
