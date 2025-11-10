@@ -48,7 +48,6 @@ client.once('ready', () => {
   console.log(`✅ Bot Active as ${client.user.tag}`);
 });
 
-// Handle nickname request
 client.on('messageCreate', async (message) => {
   if (message.author.bot) return;
   if (message.channel.id !== TARGET_CHANNEL_ID) return;
@@ -64,36 +63,45 @@ client.on('messageCreate', async (message) => {
     return message.reply("⚠️ Can't change nickname because your role is equal or higher than mine.");
   }
 
-  const requestId = `DC-${Math.random().toString(36).slice(2, 6)}-${Math.random().toString(36).slice(2, 6)}`;
+  const requestId = `REQ-${Math.random().toString(36).slice(2, 6)}`;
 
   const embed = new EmbedBuilder()
     .setColor(0x2bafff)
     .setTitle("📝 Nickname Change Request")
     .setThumbnail(member.displayAvatarURL({ dynamic: true }))
     .addFields(
-      { name: "👤 User", value: `${member}` },
-      { name: "🆕 Requested", value: `${newNick}` },
-      { name: "🪪 Request ID", value: requestId }
+      { name: "👤 User", value: `${member}`, inline: true },
+      { name: "🆔 Request ID", value: requestId, inline: true },
+      { name: "📝 Requested Nickname", value: `${newNick}`, inline: false }
     )
     .setTimestamp();
 
+  // BUTTONS ONLY FOR MOD ROLE
   const row = new ActionRowBuilder()
     .addComponents(
       new ButtonBuilder().setCustomId('accept').setLabel('✅ Approve').setStyle(ButtonStyle.Success),
       new ButtonBuilder().setCustomId('reject').setLabel('❌ Reject').setStyle(ButtonStyle.Danger)
     );
 
-  const requestMsg = await message.channel.send({ embeds: [embed], components: [row] });
+  const requestMsg = await message.channel.send({
+    embeds: [embed],
+    components: [row],
+    allowedMentions: { users: [] }
+  });
 
   const collector = requestMsg.createMessageComponentCollector({ time: 180000 });
 
   collector.on('collect', async (interaction) => {
-    if (!interaction.member.roles.cache.has(NICK_MANAGER_ROLE_ID))
-      return interaction.reply({ content: "⚠️ Only nickname managers can approve.", ephemeral: true });
+
+    // **Hide button from non-role users**
+    if (!interaction.member.roles.cache.has(NICK_MANAGER_ROLE_ID)) {
+      return interaction.reply({ content: "⚠️ You are not allowed to review nickname requests.", ephemeral: true });
+    }
 
     await interaction.deferUpdate();
-
     const mod = interaction.member;
+
+    const time = `<t:${Math.floor(Date.now() / 1000)}:F>`;
 
     if (interaction.customId === "accept") {
       try {
@@ -102,24 +110,25 @@ client.on('messageCreate', async (message) => {
         await member.setNickname(newNick);
 
         const successEmbed = new EmbedBuilder()
-          .setColor(0x00ff6a)
+          .setColor(0x4dff88)
           .setTitle("✅ Nickname Request Approved")
+          .setThumbnail(member.displayAvatarURL({ dynamic: true }))
           .addFields(
-            { name: "👤 User", value: `${member}` },
-            { name: "🆕 New Nickname", value: newNick },
-            { name: "👮 Moderator", value: mod.user.tag },
-            { name: "🪪 Request ID", value: requestId }
-          )
-          .setTimestamp();
+            { name: "👤 User", value: `${member}`, inline: true },
+            { name: "👮 Moderator", value: `${mod}`, inline: true },
+            { name: "🆕 New Nickname", value: `${newNick}`, inline: false },
+            { name: "🆔 Request ID", value: requestId, inline: true },
+            { name: "⏱️ Process Time", value: time, inline: true },
+            { name: "📌 Status", value: "🟢 Approved", inline: false }
+          );
 
         await requestMsg.edit({ embeds: [successEmbed], components: [] });
-
-        member.send(`✅ Your nickname request has been approved!\nNew Name: **${newNick}**`);
+        member.send({ embeds: [successEmbed] }).catch(() => {});
         const log = message.guild.channels.cache.get(LOG_CHANNEL_ID);
         if (log) log.send({ embeds: [successEmbed] });
 
-      } catch (e) {
-        requestMsg.edit({ content: "❌ Nickname change failed (role hierarchy issue)", components: [] });
+      } catch {
+        requestMsg.edit({ content: "❌ Nickname change failed (Role hierarchy issue)", components: [] });
       }
     }
 
@@ -127,15 +136,17 @@ client.on('messageCreate', async (message) => {
       const rejectEmbed = new EmbedBuilder()
         .setColor(0xff4e4e)
         .setTitle("❌ Nickname Request Rejected")
+        .setThumbnail(member.displayAvatarURL({ dynamic: true }))
         .addFields(
-          { name: "👤 User", value: `${member}` },
-          { name: "👮 Moderator", value: mod.user.tag },
-          { name: "🪪 Request ID", value: requestId }
-        )
-        .setTimestamp();
+          { name: "👤 User", value: `${member}`, inline: true },
+          { name: "👮 Moderator", value: `${mod}`, inline: true },
+          { name: "🆔 Request ID", value: requestId, inline: true },
+          { name: "⏱️ Process Time", value: time, inline: true },
+          { name: "📌 Status", value: "🔴 Rejected", inline: false }
+        );
 
       await requestMsg.edit({ embeds: [rejectEmbed], components: [] });
-      member.send(`❌ Your nickname request has been rejected.`);
+      member.send({ embeds: [rejectEmbed] }).catch(() => {});
       const log = message.guild.channels.cache.get(LOG_CHANNEL_ID);
       if (log) log.send({ embeds: [rejectEmbed] });
     }
