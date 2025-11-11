@@ -64,10 +64,12 @@ client.on('messageCreate', async (message) => {
 
   const content = message.content.trim().toLowerCase();
 
-  // ✅ CLEAR NICK COMMAND (Now with embed)
+  // ✅ CLEAR NICK COMMAND (Now with embed + log)
   if (content === "clear nick") {
     const member = await message.guild.members.fetch(message.author.id);
     const oldNick = member.nickname || member.user.username;
+    const logChannel = message.guild.channels.cache.get(LOG_CHANNEL_ID); // ✅ Added for log
+
     try {
       await member.setNickname(null);
 
@@ -84,6 +86,12 @@ client.on('messageCreate', async (message) => {
         .setTimestamp();
 
       await message.reply({ embeds: [clearEmbed] });
+
+      // ✅ Send same embed to log channel
+      if (logChannel) {
+        await logChannel.send({ embeds: [clearEmbed] });
+      }
+
     } catch {
       const errorEmbed = new EmbedBuilder()
         .setColor(0xff4e4e)
